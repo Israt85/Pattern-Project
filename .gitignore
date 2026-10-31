@@ -1,0 +1,7 @@
+cat > .gitignore <<'EOF'
+phishing_project/phiusiil+phishing+url+dataset/PhiUSIIL_Phishing_URL_Dataset.csv
+rf_model.pkl
+__pycache__/
+.venv/
+venv/
+EOF
