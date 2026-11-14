@@ -1,74 +1,226 @@
+
 import pandas as pd
-import joblib
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
-from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import (accuracy_score, precision_score, recall_score,
-                             f1_score, classification_report, confusion_matrix)
+import numpy as np
 
-# ---------- 1. Load ----------
-df = pd.read_csv("phishing_project/phiusiil+phishing+url+dataset/PhiUSIIL_Phishing_URL_Dataset.csv")
-print("Shape:", df.shape)
-print("Null:", df.isnull().sum().sum())
-print(df["label"].value_counts())
+from sklearn.feature_selection import SelectKBest, mutual_info_classif
+from sklearn.model_selection import GroupShuffleSplit
 
-# ---------- 2. Preprocessing ----------
-df = df.drop_duplicates(subset="URL")
-df = df.drop(columns=["FILENAME", "URL", "Domain", "Title", "TLD"])
+# =================================
+# STEP 1: LOAD DATASET
+# =================================
 
-X = df.drop(columns="label")
-y = df["label"]
+df = pd.read_csv(
+    "phishing_project/phiusiil+phishing+url+dataset/PhiUSIIL_Phishing_URL_Dataset.csv"
+)
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, stratify=y, random_state=42)
-print("Train:", X_train.shape, "Test:", X_test.shape)
+print("Original Shape:", df.shape)
 
-# ---------- 3. Models ----------
-models = {
-    "Logistic Regression": Pipeline([
-        ("scaler", StandardScaler()),
-        ("clf", LogisticRegression(max_iter=1000, class_weight="balanced"))]),
-    "Decision Tree": DecisionTreeClassifier(class_weight="balanced", random_state=42),
-    "Random Forest": RandomForestClassifier(n_estimators=100, class_weight="balanced",
-                                            n_jobs=-1, random_state=42),
-}
 
-# ---------- 4. Train + Evaluate ----------
-results = []
-for name, model in models.items():
-    print("\n=====", name, "=====")
-    model.fit(X_train, y_train)
-    pred = model.predict(X_test)
-    print(classification_report(y_test, pred, target_names=["Phishing(0)", "Legitimate(1)"]))
-    print(confusion_matrix(y_test, pred))
-    results.append({
-        "Model": name,
-        "Accuracy": accuracy_score(y_test, pred),
-        "Precision(phishing)": precision_score(y_test, pred, pos_label=0),
-        "Recall(phishing)": recall_score(y_test, pred, pos_label=0),
-        "F1(phishing)": f1_score(y_test, pred, pos_label=0),
-    })
+# =================================
+# STEP 2: REMOVE DUPLICATES
+# =================================
 
-# ---------- 5. Comparison table ----------
-res_df = pd.DataFrame(results).round(4)
-print("\n", res_df.to_string(index=False))
-res_df.to_csv("model_comparison.csv", index=False)
+df = df.drop_duplicates()
 
-# ---------- 6. Cross-validation (Random Forest) ----------
-cv = cross_val_score(models["Random Forest"], X_train, y_train, cv=5, scoring="f1", n_jobs=-1)
-print("\nCV F1 scores:", cv.round(4), "Mean:", cv.mean().round(4))
+df = df.drop_duplicates(subset=["URL"])
 
-# ---------- 7. Feature importance ----------
-imp = pd.Series(models["Random Forest"].feature_importances_, index=X.columns)
-print("\nTop 10 features:\n", imp.sort_values(ascending=False).head(10))
+print("After Duplicate Removal:", df.shape)
 
-# ---------- 8. Save model ----------
-joblib.dump(models["Random Forest"], "rf_model.pkl")
 
-# ---------- 9. Sample prediction ----------
-sample = X_test.iloc[[0]]
-print("\nPrediction:", models["Random Forest"].predict(sample)[0],
-      "| Actual:", y_test.iloc[0], "(1=Legitimate, 0=Phishing)")
+# =================================
+# STEP 3: HANDLE NULL LABELS
+# =================================
+
+df = df.dropna(subset=["label"])
+
+# Keep Domain for group splitting
+groups = df["Domain"].copy()
+
+# Target variable
+y = df["label"].copy()
+
+
+# =================================
+# STEP 4: REMOVE UNNECESSARY COLUMNS
+# =================================
+
+remove_columns = [
+    "FILENAME",
+    "URL",
+    "Domain",
+    "Title",
+    "TLD",
+    "NoOfLettersInURL",
+    "URLTitleMatchScore"
+]
+
+X = df.drop(columns=remove_columns + ["label"])
+
+# Keep numerical features only
+X = X.select_dtypes(include=np.number)
+
+print("\nRemaining Features:", X.shape[1])
+
+print("\nRemaining Columns:")
+print(X.columns.tolist())
+
+
+# =================================
+# STEP 5: TRAIN TEST SPLIT
+# =================================
+
+splitter = GroupShuffleSplit(
+    n_splits=1,
+    test_size=0.20,
+    random_state=42
+)
+
+train_idx, test_idx = next(
+    splitter.split(X, y, groups=groups)
+)
+
+X_train = X.iloc[train_idx].copy()
+X_test = X.iloc[test_idx].copy()
+
+y_train = y.iloc[train_idx].copy()
+y_test = y.iloc[test_idx].copy()
+
+groups_train = groups.iloc[train_idx]
+groups_test = groups.iloc[test_idx]
+
+print("\nTrain-Test Split Completed!")
+
+
+# =================================
+# STEP 6: HANDLE MISSING VALUES
+# =================================
+
+# Calculate median from training data only
+medians = X_train.median()
+
+# Fill missing values
+X_train = X_train.fillna(medians)
+X_test = X_test.fillna(medians)
+
+print("\nMissing Values Handled!")
+
+
+# =================================
+# STEP 7: FEATURE SELECTION
+# =================================
+
+# Select 25 best features
+selector = SelectKBest(
+    score_func=mutual_info_classif,
+    k=25
+)
+
+# Fit selector only on training data
+X_train_selected = selector.fit_transform(
+    X_train,
+    y_train
+)
+
+# Apply same selection to testing data
+X_test_selected = selector.transform(X_test)
+
+# Get selected feature names
+selected_features = X.columns[
+    selector.get_support()
+]
+
+print("\nSelected 25 Features:")
+print(selected_features.tolist())
+
+
+# =================================
+# STEP 8: CONVERT TO DATAFRAME
+# =================================
+
+X_train = pd.DataFrame(
+    X_train_selected,
+    columns=selected_features,
+    index=X_train.index
+)
+
+X_test = pd.DataFrame(
+    X_test_selected,
+    columns=selected_features,
+    index=X_test.index
+)
+
+
+# =================================
+# STEP 9: SAVE FINAL DATASETS
+# =================================
+
+train_data = X_train.copy()
+test_data = X_test.copy()
+
+train_data["label"] = y_train
+test_data["label"] = y_test
+
+# Save training dataset
+train_data.to_csv(
+    "train_data.csv",
+    index=False
+)
+
+# Save testing dataset
+test_data.to_csv(
+    "test_data.csv",
+    index=False
+)
+
+# Save selected feature names
+pd.Series(selected_features).to_csv(
+    "selected_features.csv",
+    index=False,
+    header=["Feature"]
+)
+
+
+# =================================
+# STEP 10: FINAL REPORT
+# =================================
+
+print("\n========== FINAL REPORT ==========")
+
+print("Original Dataset Shape:", df.shape)
+
+print("Original Numerical Features:", X.shape[1])
+
+print("Selected Features:", len(selected_features))
+
+print("Training Shape:", train_data.shape)
+
+print("Testing Shape:", test_data.shape)
+
+print(
+    "Missing Values in Train:",
+    train_data.isnull().sum().sum()
+)
+
+print(
+    "Missing Values in Test:",
+    test_data.isnull().sum().sum()
+)
+
+# Check domain overlap
+domain_overlap = len(
+    set(groups_train) & set(groups_test)
+)
+
+print("\nDomain Overlap:", domain_overlap)
+
+print("\nTraining Labels:")
+print(y_train.value_counts())
+
+print("\nTesting Labels:")
+print(y_test.value_counts())
+
+print("\nSelected Features:")
+for feature in selected_features:
+    print("-", feature)
+
+print("\nPreprocessing Completed Successfully!")
