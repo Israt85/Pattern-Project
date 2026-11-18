@@ -1,0 +1,2 @@
+Configuration,Model,Features,Accuracy,Phishing_Precision,Phishing_Recall,Phishing_F1,Macro_F1,ROC_AUC,Best_Model,Best_Configuration,Selected_Features
+all_28,Extra Trees,28,0.9988635646189785,0.9986860546601262,0.998161442829627,0.9984236798318592,0.9987675929145969,3.1815662686929345e-05,Extra Trees,all_28,28

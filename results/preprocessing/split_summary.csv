@@ -1,0 +1,4 @@
+Dataset,Rows,Phishing (0),Legitimate (1),Unique Domains
+Train,159383,65244,94139,122855
+Validation,44309,23854,20455,26327
+Test,31678,11422,20256,26327
